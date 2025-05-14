@@ -76,8 +76,13 @@ def hybrid_forecast_with_exogs(
     preds = []
     idx = []
 
-    for step in range(horizon):
-        today = dfh.index[-1] + pd.Timedelta(days=step+1)
+    # Generate business-day forecast dates
+    forecast_dates = pd.bdate_range(
+        start=dfh.index[-1] + pd.Timedelta(days=1),
+        periods=horizon
+    )
+
+    for step, today in enumerate(forecast_dates):
         idx.append(today)
         # apply precomputed exog forecast
         for col in EXOG_COLS:
@@ -105,7 +110,7 @@ def run_hybrid_arima_model(df: pd.DataFrame, horizon: int = 30, symbol: str = No
     df_proc.dropna(inplace=True)
     EXOG_COLS = ['Open','High','Low','Close','Volume']
 
-    # Fit ARIMA on returns and exogs once
+    # Fit ARIMA on returns and exogs
     close_arima = fit_fixed_arima(df_proc['Log_Return'], order=(5,0,2))
     exog_arimas = Parallel(n_jobs=-1)(
         delayed(fit_fixed_arima)(df_proc[col], order=(1,1,1))
@@ -120,13 +125,13 @@ def run_hybrid_arima_model(df: pd.DataFrame, horizon: int = 30, symbol: str = No
     scaler_y = MinMaxScaler().fit(residuals.reshape(-1,1))
     scaled_resid = scaler_y.transform(residuals.reshape(-1,1))
 
-    # Prepare LSTM data with smaller dataset
+    # Prepare LSTM data
     X, y = create_sequences(scaler_X.transform(df_proc[EXOG_COLS]), scaled_resid)
     split = max(int(0.8 * len(X)), 1)
     X_train, X_test = X[:split], X[split:]
     y_train, y_test = y[:split], y[split:]
 
-    # Train LSTM once
+    # Train LSTM
     lstm_model = build_and_train_lstm(X_train, y_train, X_test, y_test)
 
     # Forecast
